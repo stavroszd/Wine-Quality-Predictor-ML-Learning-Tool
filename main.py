@@ -525,3 +525,32 @@ def ElasticNet_10_times():
 
 #%%
 #---------------- Model 2: Neural Network --------------------------------------------------------
+
+#We will make a new model for the regression part of the assignment
+
+class Somelier(nn.Module): 
+    def __init__(self, input_shape = int, output_shape = int): 
+        super(Somelier, self).__init__()
+
+        #We now make our architecture
+        self.model = nn.Sequential(
+            nn.Linear(in_features=input_shape, out_features = 64),
+            nn.ReLU(),
+            nn.BatchNorm1d(64), #We add a batch normalization layer --- this first parameter 
+            #is the features that should normalize so we pass 64 in
+            nn.Linear(in_features=64, out_features=128),
+            nn.ReLU(),
+            nn.Dropout(p=0.2),
+            nn.Linear(in_features=128, out_features=64), 
+            nn.ReLU(), 
+            nn.Linear(in_features=64, out_features = output_shape)
+        )
+
+    def forward(self,x): 
+        return self.model(x)
+    
+#Let's make an instance of our model 
+
+SomelierV0 = Somelier(input_shape = 11, output_shape = 1)
+    
+#%%
