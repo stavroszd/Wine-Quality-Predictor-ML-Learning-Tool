@@ -301,38 +301,65 @@ def train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32):
 #%%We will make our training loop finally
 from torch import optim
 
-def train_step(data_loader ,model = NNmodelV0, loss_fn = nn.CrossEntropyLoss()):
-  #We have to define our optimizer function after we give the model 
-  optimizer_fn = optimizer = optim.Adam(model.parameters(), lr=0.01, weight_decay = 1e-2)
+def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None, optimizer_fn=None):
+    # We have to define our loss function and optimizer
+    if optimizer_fn is None:
+        optimizer_fn = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-2)
 
-  #No1 - Set the model to training mode 
-  model.train()
+    if loss_fn is None:
+        loss_fn = nn.CrossEntropyLoss() if task == 'classification' else nn.MSELoss()
+    # We tell it - use CrossEntropyLoss if you are doing classification, otherwise use MSELoss for regression
 
-  #We wanna track these metrics for now
-  train_loss, f1_acc = 0,0
+    # No1 - Set the model to training mode
+    model.train()
 
-  #No2 - Do the forward pass
-  for batch, (X,y) in enumerate(data_loader): #For that batch and data in the traindataloader
-    try:
-            print(f"Processing batch {batch} with indices {data_loader.batch_sampler.sampler.data_source.indices[batch*data_loader.batch_size:(batch+1)*data_loader.batch_size]}")
-    except AttributeError:
+    # We want to track the loss to be able to assess it later
+    train_loss = 0
+
+    # No2 - Do the forward pass
+    for batch, (X, y) in enumerate(data_loader):  # For each batch in the train data loader
+        try:
+            print(f"Processing batch {batch} with indices {data_loader.batch_sampler.sampler.data_source.indices[batch * data_loader.batch_size:(batch + 1) * data_loader.batch_size]}")
+        except AttributeError:
             print(f"Processing batch {batch}")
-    y_pred = (model(X))
-    #No3 - Calculate the loss
-    loss = loss_fn(y_pred, y)
-    #We wanna track the f1-score as well 
-    y_pred_f1 = y_pred.argmax(dim = 1) #This is because in y_preds we get the logits and the class is the one with the biggests logits since the sigmoid function is an increasing function 
-    #No4 - Optimizer zero grad
-    optimizer_fn.zero_grad()
-    #No 5 - Loss backward
-    loss.backward()
-    #No 6 - Optimizer update
-    optimizer_fn.step()
+        
+        y_pred = model(X)  # Forward pass
 
-    #Finally we wanna track the mean batch loss
-    loss = loss / len(data_loader)
-    f1_acc = f1_acc/ len(data_loader)
-    print(f'Train loss {train_loss} | Train Accuracy {f1_acc}')
+        # No 3 -- Compute loss and make predictions
+        if task == "classification":
+            loss = loss_fn(y_pred, y.long())  # CrossEntropyLoss expects y as long type for classification
+            y_pred_labels = y_pred.argmax(dim=1)  # Get predicted labels from logits
+        else:
+            y_pred = y_pred.squeeze()  # Squeeze to remove extra dimension for regression
+            loss = loss_fn(y_pred, y.float())  # Use MSELoss for regression, targets should be float
+
+        # No4 - Optimizer zero grad
+        optimizer_fn.zero_grad()
+
+        # No 5 - Loss backward
+        loss.backward()
+
+        # No 6 - Optimizer update
+        optimizer_fn.step()
+
+        # No 7 - Track the loss 
+        train_loss += loss.item()  # Add batch loss to total train loss
+
+    # Finally, we want to track the mean batch loss
+    avg_loss = train_loss / len(data_loader)  # Mean train loss across batches
+
+    # Metric computation
+    if task == 'classification':
+        metric = f1_score(y, y_pred_labels, average='micro')  # F1 score for classification
+    else:
+        metric = torch.sqrt(torch.tensor(avg_loss)).item()  # RMSE for regression
+
+    print(f"Train Loss: {avg_loss:.4f} | Metric ({'F1' if task == 'classification' else 'RMSE'}): {metric:.4f}")
+
+    return avg_loss, metric
+
+
+
 
 
 #%%We will also make our testing step
@@ -388,6 +415,9 @@ def NN_train_and_test_once(epochs):
     f1 = test_step(test_dataloader)[1] #We train it and get the f1 
     
     return f1
+
+#%%
+NN_train_and_test_once(10)
 
 #%%Now that we have our training function 
 def NN_10_times(epochs): 
@@ -553,4 +583,6 @@ class Somelier(nn.Module):
 
 SomelierV0 = Somelier(input_shape = 11, output_shape = 1)
     
-#%%
+#%% We will now train and test our model 
+
+#This means that we will 
