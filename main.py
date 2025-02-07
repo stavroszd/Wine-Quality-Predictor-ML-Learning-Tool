@@ -164,24 +164,47 @@ def logistic_regression_once():
     model.fit(X_train, y_train) #Fit only the training data
     y_preds = model.predict(X_train)
         
-    f1 = f1_score(y_train, y_preds, average = 'micro' )
+    f1 = f1_score(y_train, y_preds, average = 'micro')
+    parameters = model.coef_
     
-    return f1
+    return f1, parameters
 
 
 #Now we will do it 10 times and get the mean f1 score
 
 def logistic_10_times(): 
     scores = np.zeros(10)
+    parameters = []
     for i in range(10):
-        scores[i] = logistic_regression_once()
+        scores[i] = logistic_regression_once()[0]
+        parameters.append(logistic_regression_once()[1])
     
+    #We calculate and print the mean f1 score
     mean_score = np.mean(scores)
-    
+    #We calculate and print the mean of each parameter
+    #We add all the parameter arrays and then divide them by 10 to get the mean of each 
+    final_array = np.zeros(shape = parameters[0].shape)
+    #For better generalization shape could be shape = parameters[0].shape
+    for i in range(10):
+        final_array += parameters[i]
+        final_array = final_array / 10
+        
     print(f'The mean f1 of the 10 iterations is {mean_score}')
-    
-    return mean_score
-    
+
+    #We turn this into a data-frame for easier reading 
+    final_array = pd.DataFrame(final_array, columns = X.columns)
+    print(f'The mean of the parameters is {final_array}')
+
+    return mean_score, final_array
+
+
+#%% We now run the model and get the score and parameters
+logistic_f1, logistic_params = logistic_10_times()
+
+#We will now find the top 3 values in each row which is what we want 
+
+top_3_features_logistic = logistic_params.apply(lambda row: row.nlargest(3).to_dict(), axis = 1)
+#We will make this into a data frame and then we are done
 
 #%%Model 2: Neural Network 
 
@@ -636,3 +659,8 @@ def NN_train_test_n_times(epochs, n, X, y, model, task = 'classification'):
 # %% Now that we have our new functions that generalize we just pass in the data and the new model 
 
 NN_train_test_n_times(200, 10, X, y, model = SomelierV0, task = 'regression')
+
+#%% Part 3 -------------------------- Inference on important features ----------------------------------
+
+#We will look at the logistic and linear regression models and see what their parameters are 
+
