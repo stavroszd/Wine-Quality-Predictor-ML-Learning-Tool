@@ -603,4 +603,34 @@ SomelierV0 = Somelier(input_shape = 11, output_shape = 1)
     
 #%% We will now train and test our model 
 
-#This means that we will 
+#We will make a function that trains and tests our model
+#This time we will make it a bit more general
+
+def NN_train_and_test_once_general(epochs, X, y, model):
+  #We let this pre-made function do all the pre-processing
+  dictionary = train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32)
+  train_dataloader = dictionary['dataloaders'][0]
+  cv_dataloader = dictionary['dataloaders'][1]
+  test_dataloader = dictionary['dataloaders'][2]
+
+  #---------- Training the model -----------------------------------
+  #We start our training loop 
+  for epoch in range(epochs):
+    print(f'Epoch: {epoch}')
+    #Make a training step in this epoch
+    train_step(train_dataloader, model = model) #The other defaults suffice
+    #Make a test step in this epoch 
+    metric = test_step(test_dataloader, model = model)[1] #We train it and get the f1 
+    
+    return metric
+
+#%%
+#We make this function that will train and test n times
+#returning the mean of the metrics which is good practice
+
+def NN_train_test_n_times(epochs, n, X, y, model):
+    metrics = []
+    for i in range(n): metrics.append(NN_train_and_test_once_general(epochs, X, y, model))
+
+    return np.mean(metrics)
+# %% Now that we 
