@@ -436,38 +436,6 @@ def test_step(dataloader, model = NNmodelV0, loss_fn = None, task = 'classificat
 
     return test_loss, metric #We will use the f1_acc later on
 
-#%%Final Test Function
-
-
-def NN_train_and_test_once(epochs):
-  #We let this pre-made function do all the pre-processing
-  dictionary = train_cv_test_split_dataset_and_dataloader(X_in,y1, batch_size = 32)
-  train_dataloader = dictionary['dataloaders'][0]
-  cv_dataloader = dictionary['dataloaders'][1]
-  test_dataloader = dictionary['dataloaders'][2]
-
-  #---------- Training the model -----------------------------------
-  #We start our training loop 
-  for epoch in range(epochs):
-    print(f'Epoch: {epoch}')
-    #Make a training step in this epoch
-    train_step(train_dataloader) #The other defaults suffice
-    #Make a test step in this epoch 
-    f1 = test_step(test_dataloader)[1] #We train it and get the f1 
-    
-    return f1
-
-#%%
-NN_train_and_test_once(10)
-
-#%%Now that we have our training function 
-def NN_10_times(epochs): 
-    f1s = []
-    for i in range(10): f1s.append(NN_train_and_test_once(epochs))
-
-    return np.mean(f1s)
-
-
 #%%------------- Model 3: Decision Tree ---------------------------------------------------
 
 #We will feed the data X and y1 into the decision tree - which will be our 3rd model 
@@ -517,12 +485,6 @@ def tree_10_times():
     for i in range(10): f1s.append(tree_train_test())
 
     return np.mean(f1s)
-
-
-
-
-
-
 #%%--------------------------------------- Part 2 ------------------------------------------------
 
 #This is our regression part of the assignment and we will make predictions on the quality of the wines
@@ -630,6 +592,8 @@ SomelierV0 = Somelier(input_shape = 11, output_shape = 1)
 #This time we will make it a bit more general
 
 def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification'):
+  METRIC_NAME = 'F1' if task == 'classification' else 'RMSE' #This will be helpful in printing
+
   #We let this pre-made function do all the pre-processing
   dictionary = train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32)
   train_dataloader = dictionary['dataloaders'][0]
@@ -642,10 +606,15 @@ def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification')
     print(f'Epoch: {epoch}')
     #Make a training step in this epoch
     train_step(train_dataloader, model = model, task = task) #The other defaults suffice
-    #Make a test step in this epoch 
-    metric = test_step(test_dataloader, model = model, task = task)[1] #We train it and get the f1 
+    #Monitor the Validation Cost
+    if epoch % 10 == 0: 
+        print(f'Validation Cost: {test_step(cv_dataloader, model = model, task = task)[0]}')
+        print(f'Valiation Metric {METRIC_NAME}: {test_step(cv_dataloader, model = model, task = task)[1]}')
+
+  #It is important for the test_step to be outside the loop because we only want to test it once training is done
+  metric = test_step(test_dataloader, model = model, task = task)[1] #We train it and get the f1 
     
-    return metric
+  return metric
 
 #%%
 #We make this function that will train and test n times
@@ -658,9 +627,10 @@ def NN_train_test_n_times(epochs, n, X, y, model, task = 'classification'):
     return np.mean(metrics)
 # %% Now that we have our new functions that generalize we just pass in the data and the new model 
 
+#For the 1st Neural Network
+
+#For the 2nd Neural Network
 NN_train_test_n_times(200, 10, X, y, model = SomelierV0, task = 'regression')
 
 #%% Part 3 -------------------------- Inference on important features ----------------------------------
-
-#We will look at the logistic and linear regression models and see what their parameters are 
-
+#We did it at the top
