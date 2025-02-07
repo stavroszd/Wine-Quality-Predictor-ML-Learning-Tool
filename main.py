@@ -354,7 +354,7 @@ def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None
     else:
         metric = torch.sqrt(torch.tensor(avg_loss)).item()  # RMSE for regression
 
-    print(f"Train Loss: {avg_loss:.4f} | Metric ({'F1' if task == 'classification' else 'RMSE'}): {metric:.4f}")
+    print(f"Train Loss: {avg_loss:.4f} | Train Metric ({'F1' if task == 'classification' else 'RMSE'}): {metric:.4f}")
 
     return avg_loss, metric
 
@@ -365,7 +365,7 @@ def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None
 #%%We will also make our testing step
 
 #We probably can use 
-def test_step(dataloader, model = NNmodelV0, loss_fn = nn.CrossEntropyLoss()): 
+def test_step(dataloader, model = NNmodelV0, loss_fn = None, task = 'classification'): 
   '''
   We need to import the test_dataloader here
   '''
@@ -376,24 +376,42 @@ def test_step(dataloader, model = NNmodelV0, loss_fn = nn.CrossEntropyLoss()):
 
   with torch.inference_mode(): #We use inference mode because of the same reason - it is a context manager
     for X,y in dataloader: #Loop through the data loader - using batches
-      test_pred = model(X) #Forward pass - get the prediction - this gives logits - which is what we need because CrossEntropy expects logits
-      test_pred_labels = test_pred.argmax(dim = 1).numpy() #Let's also get the labels in numpy format
+      #Make a forward pass
+      test_pred = model(X) 
+      
+      #We calculate the loss - depending on the task - same as the other function
+      if loss_fn is None:
+        loss_fn = nn.CrossEntropyLoss() if task == 'classification' else nn.MSELoss()
 
-      #We calculate the loss - probably CrossEntropy 
       loss = loss_fn(test_pred, y) 
-      test_loss += loss 
+      test_loss += loss.item() 
 
-      #Store all the labels and predictions for classification - we want it as numpy arrays to then on compute the f1-score
-      all_preds.extend(test_pred_labels)
-      all_labels.extend(y.numpy())
+      #Make inference 
+      # No 3 -- Compute loss and make predictions
+      if task == "classification":
+            loss = loss_fn(test_pred, y.long())  # CrossEntropyLoss expects y as long type for classification
+            test_pred_labels = test_pred.argmax(dim = 1).numpy()  # Get predicted labels from logits
+            #Store all the labels and predictions for classification - we want it as numpy arrays to then on compute the f1-score
+            all_preds.extend(test_pred_labels)
+            all_labels.extend(y.numpy())
+      else:   
+            test_pred = test_pred.squeeze()  # Squeeze to remove extra dimension for regression
+            loss = loss_fn(test_pred, y.float())  # Use MSELoss for regression, targets should be float
 
-    #Compute what we need to compute 
-    test_loss /= len(dataloader)
-    f1_acc = f1_score(all_labels, all_preds, average = 'micro')
 
-    print(f'The test loss is {test_loss} and the f1-score is {f1_acc}')
+    # Metric computation
 
-    return test_loss, f1_acc #We will use the f1_acc later on
+    #Our loss is the average loss everywhere
+    avg_loss = test_loss / len(dataloader)
+
+    if task == 'classification':
+        metric = f1_score(y, test_pred_labels, average='micro')  # F1 score for classification
+    else:
+        metric = torch.sqrt(torch.tensor(avg_loss)).item()  # RMSE for regression    
+
+    print(f"Test Loss: {avg_loss:.4f} | Test Metric ({'F1' if task == 'classification' else 'RMSE'}): {metric:.4f}")
+
+    return test_loss, metric #We will use the f1_acc later on
 
 #%%Final Test Function
 
