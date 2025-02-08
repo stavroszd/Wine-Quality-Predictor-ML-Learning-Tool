@@ -82,19 +82,28 @@ plt.show()
 
 #---------------------- Functions we will need ----------------------------------------------
 
-#%%Anomaly Detection
-def anomaly_detection(dataset, epsilon): 
-    #We will find the mean value vector and the covariance matrix
-    mu = np.mean(dataset, axis = 0)
-    sigma = np.cov(dataset.T)
-    #Now we will make a normal distribution pdf 
-    p = multivariate_normal(mean = mu, cov = sigma).pdf(dataset)
-    #This returns the density of that specified N(m,sigma) at the points of the dataset
-    anomalies = dataset[p < epsilon]
-        
-    return anomalies
+#%%--- Part 3 of assignment --- Anomaly Detection -------
 
+#We will use an isolation forest algorithm to detect anomalies in the data
 
+#Notes: 
+#1) This algorithm essentially makes a decision tree and then it isolates the anomalies in the data
+#2) The anomalies are isolated quicker because of the split in the decision tree and become leaves way quicker
+#3) For more stability and better predictions we do tree ensembles instead of one tree
+
+#Let's make the model object --------
+from sklearn.ensemble import IsolationForest
+iso_forest_anomaly = IsolationForest(contamination = 0.05) #We use 0.05 for contamination
+#because we are not expecting a very big number of anomalies - may adjust later
+
+#Fit the data
+iso_forest_anomaly.fit(X_scaled) #We use scaled features?
+anomaly_labels = pd.DataFrame(iso_forest_anomaly.fit_predict(X_scaled), columns = ['Anomaly Label']) #This returns an array of labels -1 if outlier
+
+#Let's make an outlier dataframe 
+X_outlier = pd.concat([X, anomaly_labels], axis = 'columns')
+X_outlier.drop( labels = [i for i in X.columns], axis = 'columns', inplace = True)
+X_outliers_indexes = X_outlier[ X_outlier['Anomaly Label'] == -1].index.to_list()
 
 #%%Train - test - split 
 #Will try to remove the seed 
@@ -625,12 +634,13 @@ def NN_train_test_n_times(epochs, n, X, y, model, task = 'classification'):
     for i in range(n): metrics.append(NN_train_and_test_once_general(epochs, X, y, model, task = task))
 
     return np.mean(metrics)
-# %% Now that we have our new functions that generalize we just pass in the data and the new model 
-
+# %% We will now train and test the models
 #For the 1st Neural Network
 
+NN_train_and_n_times(200, 10, X_in, y = y1, model = NNmodelV0, task = 'classfication')
+
+#%%
 #For the 2nd Neural Network
 NN_train_test_n_times(200, 10, X, y, model = SomelierV0, task = 'regression')
 
-#%% Part 3 -------------------------- Inference on important features ----------------------------------
-#We did it at the top
+#%%
