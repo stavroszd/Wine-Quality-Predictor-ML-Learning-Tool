@@ -25,10 +25,6 @@ from sklearn.model_selection import train_test_split
 #Model Imports
 from sklearn.linear_model import LogisticRegression
 
-
-from scipy.stats import multivariate_normal
-
-
 #%%Data importing 
 df = pd.read_csv('C:/Users/stavr/Desktop/5ο εξάμηνο/statistical learning/Assignment/data/winequality-white.csv', delimiter = ';')
 #We drop our output 
@@ -336,7 +332,7 @@ from torch import optim
 def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None, optimizer_fn=None):
     # We have to define our loss function and optimizer
     if optimizer_fn is None:
-        optimizer_fn = optim.Adam(model.parameters(), lr=0.01, weight_decay=1e-2)
+        optimizer_fn = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-2)
 
     if loss_fn is None:
         loss_fn = nn.CrossEntropyLoss() if task == 'classification' else nn.MSELoss()
@@ -350,10 +346,10 @@ def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None
 
     # No2 - Do the forward pass
     for batch, (X, y) in enumerate(data_loader):  # For each batch in the train data loader
-        try:
-            print(f"Processing batch {batch} with indices {data_loader.batch_sampler.sampler.data_source.indices[batch * data_loader.batch_size:(batch + 1) * data_loader.batch_size]}")
-        except AttributeError:
-            print(f"Processing batch {batch}")
+        #----- try:
+        #    print(f"Processing batch {batch} with indices {data_loader.batch_sampler.sampler.data_source.indices[batch * data_loader.batch_size:(batch + 1) * data_loader.batch_size]}")
+        #except AttributeError:
+        #    print(f"Processing batch {batch}")
         
         y_pred = model(X)  # Forward pass
 
@@ -595,35 +591,101 @@ class Somelier(nn.Module):
 
 SomelierV0 = Somelier(input_shape = 11, output_shape = 1)
     
+#%% We wanna introduce MLflow logging 
+import mlflow 
+mlflow.set_tracking_uri('http://127.0.0.1:5000')
+
+#%% This package helps us deal with directories and files 
+import os
+
 #%% We will now train and test our model 
 
 #We will make a function that trains and tests our model
 #This time we will make it a bit more general
 
-def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification'):
-  METRIC_NAME = 'F1' if task == 'classification' else 'RMSE' #This will be helpful in printing
+def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification', batch_size = 32):
+    METRIC_NAME = 'F1' if task == 'classification' else 'RMSE' #This will be helpful in printing
+    model_weights_path = "best_model_weights.pth" #This can be adjusted if we need further customization 
 
-  #We let this pre-made function do all the pre-processing
-  dictionary = train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32)
-  train_dataloader = dictionary['dataloaders'][0]
-  cv_dataloader = dictionary['dataloaders'][1]
-  test_dataloader = dictionary['dataloaders'][2]
-
-  #---------- Training the model -----------------------------------
-  #We start our training loop 
-  for epoch in range(epochs):
-    print(f'Epoch: {epoch}')
-    #Make a training step in this epoch
-    train_step(train_dataloader, model = model, task = task) #The other defaults suffice
-    #Monitor the Validation Cost
-    if epoch % 10 == 0: 
-        print(f'Validation Cost: {test_step(cv_dataloader, model = model, task = task)[0]}')
-        print(f'Valiation Metric {METRIC_NAME}: {test_step(cv_dataloader, model = model, task = task)[1]}')
-
-  #It is important for the test_step to be outside the loop because we only want to test it once training is done
-  metric = test_step(test_dataloader, model = model, task = task)[1] #We train it and get the f1 
+    #Data Preprocessing - using our premade function
+    dictionary = train_cv_test_split_dataset_and_dataloader(X,y, batch_size = batch_size)
+    train_dataloader = dictionary['dataloaders'][0]
+    cv_dataloader = dictionary['dataloaders'][1]
+    test_dataloader = dictionary['dataloaders'][2]
     
-  return metric
+    #We will make some matrices to keep track of the metrics
+    #This will be useful in order to keep the model parameters that give the best CV los
+    train_metrics = []
+    cv_metrics = []
+    
+    #We set the best metric value to the lowest possible value for classification and the highest possible value for regression
+    #This happens because in one the objective is to find the highest value and in the other the lowest
+    best_metric_value = float('-inf') if task == 'classification' else float('inf') 
+    best_epoch = 0 
+    best_state_dict = None
+    
+    
+    #---------- Training the model -----------------------------------
+    #We start an MLflow run 
+    with mlflow.start_run():
+        mlflow.log_param('Epoch', epochs) #We log the epochs that we will train on 
+        mlflow.log_param('Task', task) #We log the task
+    
+        #We start our training loop 
+        for epoch in range(epochs):
+            print(f'Epoch: {epoch}')
+            #------- Training step -------------------
+            #We make the training step obtaining the train loss and metric
+            train_loss, train_metric = train_step(train_dataloader, model = model, task = task) #The other defaults suffice
+            #We log the train cost and metric 
+            mlflow.log_metric('Train Cost', train_loss, step = epoch)
+            mlflow.log_metric(f'Train {METRIC_NAME}', train_metric, step = epoch)
+            
+            #Monitor the Validation Cost - every 10 epochs 
+            if epoch % 10 == 0: 
+                #We get the CV loss and metric 
+                cv_loss, cv_metric = test_step(cv_dataloader, model=model, task=task)
+                #We log the CV cost and metric
+                mlflow.log_metric('CV Cost', cv_loss, step = epoch)
+                mlflow.log_metric(f'CV {METRIC_NAME}', cv_metric, step = epoch)
+                #We get the train and cv metrics to be able to plot them later
+                train_metrics.append(train_metric)
+                cv_metrics.append(cv_metric)
+            
+                #We keep track of the best model parameters
+                #This would mean updating the best metric value and the best epoch
+                if (task == 'classification' and cv_metric > best_metric_value) or (task == 'regression' and cv_metric < best_metric_value): 
+                    best_metric_value = cv_metric
+                    best_epoch = epoch
+                    best_state_dict = model.state_dict()
+            
+        #We save the best models weights as an artifact
+        if best_state_dict is not None: 
+            #Save the best_model weights to a file
+            torch.save(best_state_dict, model_weights_path)
+
+            #Log these best weights as an artifact
+            mlflow.log_artifact(model_weights_path)
+            mlflow.log_param('Best State Dict Saved', True) #Just to make sure that it is done - it will show up in logging
+
+            #We also log the model itself
+            mlflow.pytorch.log_model(model, "Best Model")
+
+        #------------------ Testing step -------------------------
+        
+        #We load the best model weights into the model and do the testing
+        if best_state_dict is not None: model.load_state_dict(best_state_dict)
+
+        #Now that the model has been initialized with the best weights we do the test step
+        test_loss, test_metric = test_step(test_dataloader, model=model, task=task)
+        mlflow.log_metric('Test Cost', test_loss)
+        mlflow.log_metric(f'Test {METRIC_NAME}', test_metric)
+
+    return test_metric
+
+#%%Debug cell 
+
+
 
 #%%
 #We make this function that will train and test n times
@@ -634,13 +696,34 @@ def NN_train_test_n_times(epochs, n, X, y, model, task = 'classification'):
     for i in range(n): metrics.append(NN_train_and_test_once_general(epochs, X, y, model, task = task))
 
     return np.mean(metrics)
-# %% We will now train and test the models
-#For the 1st Neural Network
+#%% Going to try a new model as well
 
-NN_train_and_n_times(200, 10, X_in, y = y1, model = NNmodelV0, task = 'classfication')
+class WineModelBig(nn.Module):
+    def __init__(self, input_shape, output_shape, hidden_units=[512, 256, 128, 64]):
+        super(WineModelBig, self).__init__()
 
-#%%
-#For the 2nd Neural Network
-NN_train_test_n_times(200, 10, X, y, model = SomelierV0, task = 'regression')
+        layers = []
 
-#%%
+        # Input layer -> First hidden layer
+        layers.append(nn.Linear(input_shape, hidden_units[0]))
+        layers.append(nn.ReLU())  # ReLU activation
+        layers.append(nn.BatchNorm1d(hidden_units[0]))  # Batch Normalization for stable training
+        layers.append(nn.Dropout(0.4))  # Dropout for regularization
+
+        # Hidden layers
+        for i in range(len(hidden_units)-1):
+            layers.append(nn.Linear(hidden_units[i], hidden_units[i+1]))
+            layers.append(nn.ReLU())  # ReLU activation
+            layers.append(nn.BatchNorm1d(hidden_units[i+1]))  # Batch Normalization
+            layers.append(nn.Dropout(0.4))  # Dropout for regularization
+
+        # Output layer
+        layers.append(nn.Linear(hidden_units[-1], output_shape))
+
+        # Sequential model that will stack all the layers
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.network(x)
+# %% We make an instance
+NNModelV1_Big = WineModelBig(input_shape = 11, output_shape = 3)
