@@ -33,50 +33,13 @@ X = df.drop(axis = 'columns', labels = 'quality')
 X_in = X.copy()
 X_in = X_in.to_numpy() #This will be crucial down the line
 
-#%%EDA
-
-#We wanna see a correlation heat-map
-corr_matrix = df.corr()
-sns.set_theme(style = 'white')
-
-sns.heatmap(
-    corr_matrix, 
-    annot = True,
-    cmap = 'coolwarm',
-    fmt = '.2f',
-    linewidths = 0.5
-    )
-
-plt.title('Correlation HeatMap')
-plt.show()
-
-#We found some correlations between features and we will do a pair plot to look into them 
-correlated_features = df[['density', 'residual sugar', 'alcohol', 'free sulfur dioxide', 'total sulfur dioxide']]
-sns.pairplot(correlated_features, diag_kind = 'kde', corner = True) #We save this plot as an image
-
-
-#PCA on the Scaled Data
-
-#Standard Scaling 
-
 scaler = StandardScaler()
 X_scaled = scaler.fit_transform(X)   
 df_scaled = pd.DataFrame(X_scaled, columns = X.columns) 
 
-#We need to get a good approximation on what is a good number of principal components
-pca = PCA()
-pca.fit(df_scaled) #This is a PCA object
-
-#We wanna plot to see which number of features gives us a good variance
-plt.plot(range(1, len(pca.explained_variance_ratio_) + 1), 
-         pca.explained_variance_ratio_.cumsum(), marker='o')
-plt.xlabel('Number of Principal Components')
-plt.ylabel('Cumulative Explained Variance')
-plt.show()
-
-#We see that it might be good to do PCA with 8 pc's because we are about 95% of the variance there
-
-#---------------------- Functions we will need ----------------------------------------------
+#%%EDA - Exploratory Data Analysis
+#This will be useful if we do some stuff down the line for the pipeline 
+#This probably will need to be re-written given our new knowledge - that's why I deleted it
 
 #%%--- Part 3 of assignment --- Anomaly Detection -------
 
@@ -100,6 +63,7 @@ anomaly_labels = pd.DataFrame(iso_forest_anomaly.fit_predict(X_scaled), columns 
 X_outlier = pd.concat([X, anomaly_labels], axis = 'columns')
 X_outlier.drop( labels = [i for i in X.columns], axis = 'columns', inplace = True)
 X_outliers_indexes = X_outlier[ X_outlier['Anomaly Label'] == -1].index.to_list()
+
 
 #%%Train - test - split 
 #Will try to remove the seed 
@@ -140,6 +104,7 @@ def scale(X_train, X_CV, X_test ,y = None):
 
 
 #%%  Part 1 --- Classification
+#This code is poor and needs to be re-written but I can't do it now because I need to keep the pipeline going
 
 # We need to do some further data preprocessing here to turn the quality from numbers to categories 
 y1 = y.copy() #We make a y1 for classification copy
@@ -149,7 +114,13 @@ y1.loc[y1 <= 4] = 0 #Bad
 y1.loc[(y1 == 5) | (y1 == 6)] = 1 #Medium
 y1.loc[y1 > 6 ] = 2 #Good
 
+#%%Anomaly Detection - We will remove the outliers from the data
+#Probably we will have to re-write this code as well - would be more useful to do it at the start of the pipeline 
+#after the anomaly detection
 
+#We will remove the outliers from the data
+X_in_without_outliers = df_scaled.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True).to_numpy()
+y1_without_outliers = y1.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
 
 #%% Model 1: Logistic Regression 
 
@@ -312,11 +283,11 @@ def train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32):
   #Creating the dataloaders from them 
 
   #Note that we need the train one to shuffle as this will make a better fit
-  train_dataloader = DataLoader(train_dataset, shuffle = False, batch_size = 32, num_workers=0) #We do not use num_workers because we are on windows
+  train_dataloader = DataLoader(train_dataset, shuffle = False, batch_size = batch_size, num_workers=0) #We do not use num_workers because we are on windows
   #------- This is very important - DEBUG - I think we have to let shuffle = False because 
   #our train test split is already down in random seed so this might explain for the randomness in the key error!
-  cv_dataloader = DataLoader(cv_dataset, batch_size=32, shuffle=False, num_workers = 0 ) #We do not shuffle the test and cv data
-  test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False, num_workers = 0) #We do not shuffle the test and cv data
+  cv_dataloader = DataLoader(cv_dataset, batch_size=batch_size, shuffle=False, num_workers = 0 ) #We do not shuffle the test and cv data
+  test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers = 0) #We do not shuffle the test and cv data
   dataloaders = [train_dataloader, cv_dataloader, test_dataloader]
 
   dataset_dataloader_dict = {'datasets': datasets, 'dataloaders': dataloaders}
@@ -332,7 +303,7 @@ from torch import optim
 def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None, optimizer_fn=None):
     # We have to define our loss function and optimizer
     if optimizer_fn is None:
-        optimizer_fn = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-2)
+        optimizer_fn = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4) #This should change
 
     if loss_fn is None:
         loss_fn = nn.CrossEntropyLoss() if task == 'classification' else nn.MSELoss()
@@ -597,15 +568,17 @@ mlflow.set_tracking_uri('http://127.0.0.1:5000')
 
 #%% This package helps us deal with directories and files 
 import os
+import time
 
 #%% We will now train and test our model 
 
 #We will make a function that trains and tests our model
 #This time we will make it a bit more general
 
-def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification', batch_size = 32):
+def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification', batch_size = 128, name = None):
     METRIC_NAME = 'F1' if task == 'classification' else 'RMSE' #This will be helpful in printing
-    model_weights_path = "best_model_weights.pth" #This can be adjusted if we need further customization 
+    #The path can be modified to adopt to the directory that it needs to be saved to
+    model_weights_path = f'results/{name}_best_weights.pth' if name is not None else 'results/best_weights.pth'#This will be the path where we save the weights of the model
 
     #Data Preprocessing - using our premade function
     dictionary = train_cv_test_split_dataset_and_dataloader(X,y, batch_size = batch_size)
@@ -627,7 +600,7 @@ def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification',
     
     #---------- Training the model -----------------------------------
     #We start an MLflow run 
-    with mlflow.start_run():
+    with mlflow.start_run(run_name = f'Run for Model: {name}'):
         mlflow.log_param('Epoch', epochs) #We log the epochs that we will train on 
         mlflow.log_param('Task', task) #We log the task
     
@@ -690,12 +663,23 @@ def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification',
 #%%
 #We make this function that will train and test n times
 #returning the mean of the metrics which is good practice
-
-def NN_train_test_n_times(epochs, n, X, y, model, task = 'classification'):
+#The rest will be logged in MLflow and we can pull it from there whenever we want it
+def NN_train_test_n_times(epochs, n, X, y, model_class, task='classification', name=None, batch_size=32, **model_kwargs):
+    '''
+    Arguments: 
+    - model_class || The class of the model that we want to use, NOT an instance.
+    - model_kwargs || Any extra arguments needed to initialize the model.
+    '''
+    
     metrics = []
-    for i in range(n): metrics.append(NN_train_and_test_once_general(epochs, X, y, model, task = task))
+    for run in range(n):
+        model = model_class(**model_kwargs)  # Create a new instance with the given parameters
+        print(f'Run: {run}')
+        
+        metrics.append(NN_train_and_test_once_general(epochs, X, y, model=model, task=task, name=f'{name}_Run_Number_{run}', batch_size=batch_size))
 
     return np.mean(metrics)
+
 #%% Going to try a new model as well
 
 class WineModelBig(nn.Module):
@@ -727,3 +711,36 @@ class WineModelBig(nn.Module):
         return self.network(x)
 # %% We make an instance
 NNModelV1_Big = WineModelBig(input_shape = 11, output_shape = 3)
+
+#%% -------------------------------------------- Final Pipeline --------------------------------------------
+''''
+We will now make a pipeline that will do the following:
+    - Train and test the classification Neural Network model 10 times and record it in ML flow 
+    - Train and test the regression Neural Network model 10 times and record it in ML flow
+'''
+
+
+#%%------------------ Part 1: Classification ----------------------------------------------------------------
+'''
+We provide
+- epochs: 200 because we saw there was convergence by then for sure
+- n: 10 because we want to do it 10 times
+- X: X_in because we want to use the data with the anomalies deleted
+- y1: y1 because we want to use the data subdivided into classes
+- model: WineModelBig because we want to use the big model
+- name: 'Wine Classifier' because we want to name the model in MLflow
+'''
+
+#We reset the models parameters
+NN_train_test_n_times(epochs = 250, n = 10, X = X_in, y = y1, model_class = WineModelBig, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
+
+#Note that the ones at the end are kwargs that are passed to the model class to instaniate it with proper parameters
+
+#We 
+# %% Debug Cell 
+
+#Let me run one by each self
+
+
+NN_train_and_test_once_general(epochs = 500, X = X_in, y = y1, model = NNModelV1_Big, task = 'classification', name = 'Wine Classifier', batch_size = 128)
+# %%
