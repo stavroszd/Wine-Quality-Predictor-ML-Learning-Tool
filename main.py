@@ -100,7 +100,7 @@ def scale(X_train, X_CV, X_test ,y = None):
     #For the output ----- I am not going to do this right now
     
     return X_train_scaled, X_CV_scaled , X_test_scaled
-    
+ 
 
 
 #%%  Part 1 --- Classification
@@ -119,7 +119,12 @@ y1.loc[y1 > 6 ] = 2 #Good
 #after the anomaly detection
 
 #We will remove the outliers from the data
+
+#For the input
 X_in_without_outliers = df_scaled.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True).to_numpy()
+#For the output just as ratings
+y_without_outliers = y.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
+#For the output with the new labels into classes
 y1_without_outliers = y1.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
 
 #%% Model 1: Logistic Regression 
@@ -130,13 +135,13 @@ def logistic_regression_once():
     
     #We split our data - we use y1 because we want to do it with our 0,1,2 format data
     #We use X instead of X_scaled because we want to do the scaling only on the training data
-    X_train, X_cv, X_test, y_train, y_cv, y_test = train_cv_test_split(X, y1)
+    X_train, X_cv, X_test, y_train, y_cv, y_test = train_cv_test_split(X_in_without_outliers, y1_without_outliers)
     
     #Proper standard scaling 
     X_train, X_cv, X_test = scale(X_train, X_cv, X_test)
     
     #We make our model
-    model = LogisticRegression()
+    model = LogisticRegression(penalty = 'l2')
     model.fit(X_train, y_train) #Fit only the training data
     y_preds = model.predict(X_train)
         
@@ -176,7 +181,7 @@ def logistic_10_times():
 
 #%% We now run the model and get the score and parameters
 logistic_f1, logistic_params = logistic_10_times()
-
+#%%
 #We will now find the top 3 values in each row which is what we want 
 
 top_3_features_logistic = logistic_params.apply(lambda row: row.nlargest(3).to_dict(), axis = 1)
@@ -303,7 +308,7 @@ from torch import optim
 def train_step(data_loader, model=NNmodelV0, task='classification', loss_fn=None, optimizer_fn=None):
     # We have to define our loss function and optimizer
     if optimizer_fn is None:
-        optimizer_fn = optim.Adam(model.parameters(), lr=0.0005, weight_decay=1e-4) #This should change
+        optimizer_fn = optim.AdamW(model.parameters(), lr=0.001, weight_decay=2e-2) #This should change
 
     if loss_fn is None:
         loss_fn = nn.CrossEntropyLoss() if task == 'classification' else nn.MSELoss()
@@ -444,7 +449,7 @@ wine_tree = DecisionTreeClassifier(criterion = 'gini', max_depth = 5)
 
 def tree_train_test(): 
     #We preprocess our data
-    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X_in, y1)
+    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X_in_without_outliers, y1_without_outliers)
     #We will train our model 
     wine_tree.fit(X_train, y_train)
     #We will test our model 
@@ -469,68 +474,73 @@ from sklearn.metrics import mean_squared_error as MSE
 
 
 #%% ---------- Model 1: Linear Regression --------------------------------------------------------
-from sklearn.linear_model import Ridge
+from sklearn.linear_model import Lasso
 
 #We start of with a simple as possible model - a linear regression model
 #The procedure is as simple as it gets. 
 
 
-def train_linear_regression_once(): 
-    #We will make a Linear Regression model using regularization
-    ridge_model = Ridge(alpha = 0.001) #We start with a small regularization parameter like we learned in class
+def train_linear_regression_once(l1_lamda = 0.01, X = X_in_without_outliers, y = y_without_outliers): 
+    #We will make a Linear Regression model using L1 regularization
+    lasso_model = Lasso(alpha = l1_lamda) #We start with a small regularization parameter like we learned in class
 
     #We will pre-process our data 
-    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X_in, y)
+    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X, y)
     #Note we pass in y and not y since we have to predict a continious variable. 
-
     #We will train our model
-    ridge_model.fit(X_train, y_train)
+    lasso_model.fit(X_train, y_train)
     #We will make predictions
-    y_preds = ridge_model.predict(X_test)
+    y_preds = lasso_model.predict(X_test)
 
     #We will compute our RMSE for the true labels and the predicted labels
     rmse = np.sqrt(MSE(y_test, y_preds))
+    parameters = lasso_model.coef_
 
-    return rmse
+
+    return rmse, parameters
 
 
 #%%
 def linear_regression_10_times(): 
-    rsmes = []
-    for i in range(10): rsmes.append(train_linear_regression_once())
+    scores = np.zeros(10)
+    parameters = []
+    for i in range(10):
+        scores[i] = train_linear_regression_once()[0]
+        parameters.append(train_linear_regression_once()[1])
+    
+    #We calculate and print the mean f1 score
+    mean_score = np.mean(scores)
+    #We calculate and print the mean of each parameter
+    #We add all the parameter arrays and then divide them by 10 to get the mean of each 
+    final_array = np.zeros(shape = parameters[0].shape)
+    #For better generalization shape could be shape = parameters[0].shape
+    for i in range(10):
+        final_array += parameters[i]
+        final_array = final_array / 10
+        
+    print(f'The mean RMSE of the 10 iterations is {mean_score}')
 
-    return np.mean(rsmes)
+    #We turn this into a data-frame for easier reading 
+    final_array = pd.DataFrame(final_array, columns = X.columns)
+    print(f'The mean of the parameters is {final_array}')
 
-#%%---We will try the same code but with an Elastic Net model
+    return mean_score, final_array
 
-from sklearn.linear_model import ElasticNet
-def ElasticNet_once(): 
-    #We will make a Linear Regression model using regularization
-    ridge_model = ElasticNet(alpha = 0.01, l1_ratio = 1) #We start with a small regularization parameter like we learned in class
+#%% 
+linear_regression_10_times()
 
-    #We will pre-process our data 
-    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X_in, y)
-    #Note we pass in y and not y since we have to predict a continious variable. 
 
-    #We will train our model
-    ridge_model.fit(X_train, y_train)
-    #We will make predictions
-    y_preds = ridge_model.predict(X_test)
 
-    #We will compute our RMSE for the true labels and the predicted labels
-    rmse = np.sqrt(MSE(y_test, y_preds))
+#%%We will now make a function that will return the top 3 features for the linear regression model
 
-    return rmse
+def linear_regression_top_3_features():
+    #We will make a dictionary that will hold the coefficients of the model
+    #We will then sort it and get the top 3 values
+    coefficients = train_linear_regression_once()
+    coefficients = pd.Series(coefficients, index = X.columns)
+    top_3_features = coefficients.nlargest(3).to_dict()
 
-def ElasticNet_10_times(): 
-    rsmes = []
-    for i in range(10): rsmes.append(ElasticNet_once())
-    print(f'The mean RMSE of the 10 iterations is {np.mean(rsmes)}')
-    print(f'The minimum RMSE of the 10 iterations is {np.min(rsmes)}')
-    print(f'The maximum RMSE of the 10 iterations is {np.max(rsmes)}')
-    print(f'The standard deviation of the RMSE of the 10 iterations is {np.std(rsmes)}')
-    return 
-
+    return top_3_features
 
 #%%
 #---------------- Model 2: Neural Network --------------------------------------------------------
@@ -594,6 +604,8 @@ def NN_train_and_test_once_general(epochs, X, y, model, task = 'classification',
     #We set the best metric value to the lowest possible value for classification and the highest possible value for regression
     #This happens because in one the objective is to find the highest value and in the other the lowest
     best_metric_value = float('-inf') if task == 'classification' else float('inf') 
+    best_cv_loss = float('inf')
+    #I will adapt this function to work with the loss instead of the metric - because metrics are most unstable
     best_epoch = 0 
     best_state_dict = None
     
@@ -731,16 +743,57 @@ We provide
 - name: 'Wine Classifier' because we want to name the model in MLflow
 '''
 
-#We reset the models parameters
-NN_train_test_n_times(epochs = 250, n = 10, X = X_in, y = y1, model_class = WineModelBig, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
+
+NN_train_test_n_times(epochs = 300, n = 1, X = X_in, y = y1, model_class = WinePredictorV0, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
 
 #Note that the ones at the end are kwargs that are passed to the model class to instaniate it with proper parameters
 
 #We 
-# %% Debug Cell 
+# %% We will do the regression task as well
 
-#Let me run one by each self
+# ---------- Expirimental, trying once ------------------------------------------------------------------------------
 
+#We will try to use the data with the outliers removed
+NN_train_test_n_times(epochs = 300, n = 1, X = X_in_without_outliers, y = y_without_outliers, model_class = WineModelBig, task = 'regression', name = 'Wine Regressor', batch_size = 128, input_shape = 11, output_shape = 1) 
+# %% Trying a new architecture
 
-NN_train_and_test_once_general(epochs = 500, X = X_in, y = y1, model = NNModelV1_Big, task = 'classification', name = 'Wine Classifier', batch_size = 128)
+import torch
+import torch.nn as nn
+
+class WineModelOptimized(nn.Module):
+    def __init__(self, input_shape, output_shape, hidden_units=[256, 128, 64]):
+        super(WineModelOptimized, self).__init__()
+
+        self.input_layer = nn.Sequential(
+            nn.Linear(input_shape, hidden_units[0]),
+            nn.LeakyReLU(negative_slope=0.01),
+            nn.BatchNorm1d(hidden_units[0]),
+            nn.Dropout(0.2)
+        )
+
+        self.hidden_layers = nn.ModuleList()
+        for i in range(len(hidden_units) - 1):
+            self.hidden_layers.append(nn.Sequential(
+                nn.Linear(hidden_units[i], hidden_units[i+1]),
+                nn.LeakyReLU(negative_slope=0.01),
+                nn.BatchNorm1d(hidden_units[i+1]),
+                nn.Dropout(0.2)
+            ))
+
+        self.output_layer = nn.Linear(hidden_units[-1], output_shape)
+
+    def forward(self, x):
+        x = self.input_layer(x)
+        for layer in self.hidden_layers:
+            x = layer(x)  # Standard forward pass
+        return self.output_layer(x)
+
+# %%
+#We will now train and test this model
+
+NN_train_test_n_times(epochs = 400, n = 3, X = X_in_without_outliers, y = y1_without_outliers, model_class = WineModelOptimized, task = 'classification', name = 'Wine Regressor Optimized', batch_size = 128, input_shape = 11, output_shape = 3)
+# %%
+#Trial run
+NN_train_test_n_times(epochs = 300, n = 1, X = X_in, y = y1, model_class = WinePredictorV0, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
+
 # %%
