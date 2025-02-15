@@ -70,7 +70,7 @@ import optuna
 
 
 #%%Data importing 
-df = pd.read_csv('C:/Users/stavr/Desktop/5ο εξάμηνο/statistical learning/Assignment/data/winequality-white.csv', delimiter = ';')
+df = pd.read_csv('data\winequality-white.csv', delimiter = ';')
 #We drop our output 
 y = df['quality']
 X = df.drop(axis = 'columns', labels = 'quality')
