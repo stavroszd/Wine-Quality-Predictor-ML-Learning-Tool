@@ -49,9 +49,6 @@ def anomaly_detection(data, contamination = 0.05, y_included = False, **kwargs):
     - anomalies_indexes: The indexes that they show up at
     '''
 
-    #Debug: 
-    print(pd.__version__)
-
     #We make sure we are given a pandas dataset 
     
     if not isinstance(data, pd.DataFrame):
