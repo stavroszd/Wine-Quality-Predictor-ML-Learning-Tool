@@ -5,8 +5,6 @@ Created on Thu Jan  2 15:24:52 2025
 @author: stavr
 """
 
-#%%Data Preprocessing
-
 #%%Importing the necessary packages 
 
 #Basic Python Packages
@@ -17,14 +15,19 @@ import sys
 #Data-Processing
 import pandas as pd 
 import numpy as np
-import matplotlib.pyplot as plt 
-import seaborn as sns 
+#import matplotlib.pyplot as plt 
+#import seaborn as sns 
 
 #PreProcessing
 from sklearn.metrics import f1_score
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+
+#Pre-Processing custom built functions
+from data_preprocessing import np_to_tensor, pd_to_tensor
+from data_preprocessing import train_cv_test_split_dataset_and_dataloader
+from data_preprocessing import anomaly_detection
 
 
 #Metrics
@@ -41,7 +44,6 @@ from sklearn.tree import DecisionTreeClassifier,plot_tree
 import torch
 from torch import nn
 import torch.nn.functional as F
-import itertools
 
 #We make a class of our model - they are in another file and imported at the end
 import torch
@@ -55,10 +57,10 @@ from torch.utils.data import DataLoader
 
 #We will first make our Dataset class - this will be useful for the Neural Network
 from torch.utils.data import Dataset
-from modules import WineQualityDataset
+from models import WineQualityDataset
 
 #Torch model imports
-from modules import WinePredictorV0, WineModelOptimized, WineModelBig, Somelier
+from models import WinePredictorV0, WineModelOptimized, WineModelBig, Somelier
 
 #We will use MLflow to log our experiments
 import mlflow 
@@ -66,85 +68,22 @@ mlflow.set_tracking_uri('http://127.0.0.1:5000')
 
 #Hyperparameter tuning 
 import itertools
-import optuna
-
+#import optuna
+ 
 
 #%%Data importing 
-df = pd.read_csv('data\winequality-white.csv', delimiter = ';')
+df = pd.read_csv('data/winequality-white.csv', delimiter = ';')
 #We drop our output 
 y = df['quality']
 X = df.drop(axis = 'columns', labels = 'quality')
 X_in = X.copy()
 X_in = X_in.to_numpy() #This will be crucial down the line
+#%% Anomaly Detection
 
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)   
-df_scaled = pd.DataFrame(X_scaled, columns = X.columns) 
-
-#%%EDA - Exploratory Data Analysis
-#This will be useful if we do some stuff down the line for the pipeline 
-#This probably will need to be re-written given our new knowledge - that's why I deleted it
-
-#%%--- Part 3 of assignment --- Anomaly Detection -------
-
-#We will use an isolation forest algorithm to detect anomalies in the data
-
-#Notes: 
-#1) This algorithm essentially makes a decision tree and then it isolates the anomalies in the data
-#2) The anomalies are isolated quicker because of the split in the decision tree and become leaves way quicker
-#3) For more stability and better predictions we do tree ensembles instead of one tree
-
-#Let's make the model object --------
-iso_forest_anomaly = IsolationForest(contamination = 0.05) #We use 0.05 for contamination
-#because we are not expecting a very big number of anomalies - may adjust later
-
-#Fit the data
-iso_forest_anomaly.fit(X_scaled) #We use scaled features?
-anomaly_labels = pd.DataFrame(iso_forest_anomaly.fit_predict(X_scaled), columns = ['Anomaly Label']) #This returns an array of labels -1 if outlier
-
-#Let's make an outlier dataframe 
-X_outlier = pd.concat([X, anomaly_labels], axis = 'columns')
-X_outlier.drop( labels = [i for i in X.columns], axis = 'columns', inplace = True)
-X_outliers_indexes = X_outlier[ X_outlier['Anomaly Label'] == -1].index.to_list()
-
-
-#%%Train - test - split 
-#Will try to remove the seed 
-
-def train_cv_test_split(X,y): 
-    #We make our train - temp data split first in order to further split temp into Cv and test
-    X_train, X_temp, y_train, y_temp = train_test_split(X,y, test_size = 0.3)
-    X_cv , X_test, y_cv, y_test = train_test_split(X_temp, y_temp, test_size = 2/3)
-    
-    return X_train, X_cv, X_test, y_train, y_cv, y_test
-
-#%%Feature Scaling in Train - CV - Test
-
-def scale(X_train, X_CV, X_test ,y = None): 
-    #We will make a function that does the scaling and if you need to scale the outputs 
-    #e.g. Regression Model then use a list of the form y_train, ,y_cv, y_test
-    
-    #You can use a validation set or not if you want
-    
-    scale_obj = StandardScaler()
-    
-    #Fit it only on the training set
-    X_train_scaled = scale_obj.fit_transform(X_train)
-    
-    #Then apply that same m,sigma to the others 
-    
-    #For the input 
-    try: X_CV_scaled = scale_obj.transform(X_CV)
-    except: print('You need to provide a validation set')
-        
-    try: X_test_scaled = scale_obj.transform(X_test)
-    except: print('You need to provide a test set')
-
-    #For the output ----- I am not going to do this right now
-    
-    return X_train_scaled, X_CV_scaled , X_test_scaled
- 
-
+#We drop the anomalous data and also get the indexes
+X_outliers_indexes, X_in_without_outliers = anomaly_detection(data = X_in, contamination = 0.05, y_included = False)
+#We drop them from our y ones as well
+y_without_outliers = y.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
 
 #%%  Part 1 --- Classification
 #This code is poor and needs to be re-written but I can't do it now because I need to keep the pipeline going
@@ -156,151 +95,6 @@ y1 = y.copy() #We make a y1 for classification copy
 y1.loc[y1 <= 4] = 0 #Bad 
 y1.loc[(y1 == 5) | (y1 == 6)] = 1 #Medium
 y1.loc[y1 > 6 ] = 2 #Good
-
-#%%Anomaly Detection - We will remove the outliers from the data
-#Probably we will have to re-write this code as well - would be more useful to do it at the start of the pipeline 
-#after the anomaly detection
-
-#We will remove the outliers from the data
-
-#For the input
-X_in_without_outliers = df_scaled.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True).to_numpy()
-#For the output just as ratings
-y_without_outliers = y.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
-#For the output with the new labels into classes
-y1_without_outliers = y1.drop(axis = 0, labels = X_outliers_indexes).reset_index(drop = True)
-
-#%% Model 1: Logistic Regression 
-
-
-#I will make a function that will do all of this and I will just loop it    
-def logistic_regression_once(): 
-    
-    #We split our data - we use y1 because we want to do it with our 0,1,2 format data
-    #We use X instead of X_scaled because we want to do the scaling only on the training data
-    X_train, X_cv, X_test, y_train, y_cv, y_test = train_cv_test_split(X_in_without_outliers, y1_without_outliers)
-    
-    #Proper standard scaling 
-    X_train, X_cv, X_test = scale(X_train, X_cv, X_test)
-    
-    #We make our model
-    model = LogisticRegression(penalty = 'l2')
-    model.fit(X_train, y_train) #Fit only the training data
-    y_preds = model.predict(X_train)
-        
-    f1 = f1_score(y_train, y_preds, average = 'micro')
-    parameters = model.coef_
-    
-    return f1, parameters
-
-
-#Now we will do it 10 times and get the mean f1 score
-
-def logistic_10_times(): 
-    scores = np.zeros(10)
-    parameters = []
-    for i in range(10):
-        scores[i] = logistic_regression_once()[0]
-        parameters.append(logistic_regression_once()[1])
-    
-    #We calculate and print the mean f1 score
-    mean_score = np.mean(scores)
-    #We calculate and print the mean of each parameter
-    #We add all the parameter arrays and then divide them by 10 to get the mean of each 
-    final_array = np.zeros(shape = parameters[0].shape)
-    #For better generalization shape could be shape = parameters[0].shape
-    for i in range(10):
-        final_array += parameters[i]
-        final_array = final_array / 10
-        
-    print(f'The mean f1 of the 10 iterations is {mean_score}')
-
-    #We turn this into a data-frame for easier reading 
-    final_array = pd.DataFrame(final_array, columns = X.columns)
-    print(f'The mean of the parameters is {final_array}')
-
-    return mean_score, final_array
-
-
-#%% We now run the model and get the score and parameters
-logistic_f1, logistic_params = logistic_10_times()
-#%%
-#We will now find the top 3 values in each row which is what we want 
-
-top_3_features_logistic = logistic_params.apply(lambda row: row.nlargest(3).to_dict(), axis = 1)
-#We will make this into a data frame and then we are done
-
-#%%Model 2: Neural Network 
-
-
-
-#%%PyTorch workflow 
-
-#---------- I need to debug this ----------------
-
-
-#Now let's instantiate our model - this first time around with all 11 features and 3 outputs
-#because we want a Classification one 
-NNmodelV0 = WinePredictorV0(input_shape = 11, output_shape = 3)
-
-
-#We will utilise the Dataset and DataLoader utils because they make it more efficient through batching and shuffling
-
-
-#%%
-def np_to_tensor(arrays): 
-    return tuple(torch.tensor(data = array, dtype = torch.float32) for array in arrays)
-
-def pd_to_tensor(dfs): 
-    return tuple(torch.tensor(data = df.to_numpy(), dtype = torch.long) for df in dfs) #This makes the dataframe a numpy object and then a tensor one
-
-#%%
-
-#We will make a couple of more helper functions now for our training
-def train_cv_test_split_dataset_and_dataloader(X,y, batch_size = 32):
-
-  '''This function will 
-  1) Take the data and do a split 
-  2) Scale like we want to 
-  3) Return it as WineQuality dataset objects and as dataloader'''
-
-  #Do a train - cv - test split  
-  X_train, X_cv, X_test, y_train, y_cv, y_test = train_cv_test_split(X,y)
-  #Scale the data
-  X_train_scaled, X_CV_scaled , X_test_scaled = scale(X_train, X_cv, X_test) 
-  #Turn them into tensors
-  X_train_scaled, X_CV_scaled , X_test_scaled = np_to_tensor((X_train_scaled, X_CV_scaled , X_test_scaled))
-  y_train, y_cv, y_test = pd_to_tensor((y_train, y_cv, y_test))  
-
-  #I wanna turn them into tensors
-
-  # Ensure that the lengths of X and y are the same
-  assert len(X_train_scaled) == len(y_train), "Mismatch in length of X_train_scaled and y_train"
-  assert len(X_CV_scaled) == len(y_cv), "Mismatch in length of X_CV_scaled and y_cv"
-  assert len(X_test_scaled) == len(y_test), "Mismatch in length of X_test_scaled and y_test"
- 
-
-  #Creating the DataSet objects 
-  train_dataset = WineQualityDataset(X_train_scaled, y_train)
-  cv_dataset = WineQualityDataset(X_CV_scaled, y_cv)
-  test_dataset = WineQualityDataset(X_test_scaled, y_test)
-  datasets = [train_dataset, cv_dataset, test_dataset]
-
-  #Creating the dataloaders from them 
-
-  #Note that we need the train one to shuffle as this will make a better fit
-  train_dataloader = DataLoader(train_dataset, shuffle = False, batch_size = batch_size, num_workers=0) #We do not use num_workers because we are on windows
-  #------- This is very important - DEBUG - I think we have to let shuffle = False because 
-  #our train test split is already down in random seed so this might explain for the randomness in the key error!
-  cv_dataloader = DataLoader(cv_dataset, batch_size=batch_size, shuffle=False, num_workers = 0 ) #We do not shuffle the test and cv data
-  test_dataloader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers = 0) #We do not shuffle the test and cv data
-  dataloaders = [train_dataloader, cv_dataloader, test_dataloader]
-
-  dataset_dataloader_dict = {'datasets': datasets, 'dataloaders': dataloaders}
-                            
-
-  return dataset_dataloader_dict
-
 
 
 #%%We will make our training loop finally
@@ -416,108 +210,6 @@ def test_step(dataloader, model, loss_fn = None, task = 'classification'):
     print(f"Test Loss: {avg_loss:.4f} | Test Metric ({'F1' if task == 'classification' else 'RMSE'}): {metric:.4f}")
 
     return test_loss, metric #We will use the f1_acc later on
-
-#%%------------- Model 3: Decision Tree ---------------------------------------------------
-
-#We will feed the data X and y1 into the decision tree - which will be our 3rd model 
-# Importing our packages 
-
-#We make a preprocess function that works the same way
-def preprocess_np(X,y): 
-    #Do a train - cv - test split  
-    X_train, X_cv, X_test, y_train, y_cv, y_test = train_cv_test_split(X,y)
-    #Scale the data
-    X_train_scaled, X_CV_scaled , X_test_scaled = scale(X_train, X_cv, X_test)
-
-    return X_train_scaled, X_CV_scaled , X_test_scaled, y_train, y_cv, y_test
-
-
-#%% Making the model
-#Importing the necessary packages 
-#Hyperparameters --------------------------------------------------------
-#We will use the gini impurity criterion - just like we learned in class
-#We will use max_depth = 5 for now to start - we can always expirmenet with this
-wine_tree = DecisionTreeClassifier(criterion = 'gini', max_depth = 5)
-
-#%%
-
-#We will make a function that trains and tests our tree
-
-def tree_train_test(): 
-    #We preprocess our data
-    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X_in_without_outliers, y1_without_outliers)
-    #We will train our model 
-    wine_tree.fit(X_train, y_train)
-    #We will test our model 
-    y_preds = wine_tree.predict(X_test)
-    #We will get the f1 score 
-    f1 = f1_score(y_test, y_preds, average = 'micro')
-
-    return f1 
-
-#%%We will make a function that does it 10 times 
-
-def tree_10_times():
-    f1s = []
-    for i in range(10): f1s.append(tree_train_test())
-
-    return np.mean(f1s)
-#%%--------------------------------------- Part 2 ------------------------------------------------
-
-#This is our regression part of the assignment and we will make predictions on the quality of the wines
-#Since we will need to do Regression we will import our RMSE function 
-
-#%% ---------- Model 1: Linear Regression --------------------------------------------------------
-#We start of with a simple as possible model - a linear regression model
-#The procedure is as simple as it gets. 
-
-
-def train_linear_regression_once(l1_lamda = 0.01, X = X_in_without_outliers, y = y_without_outliers): 
-    #We will make a Linear Regression model using L1 regularization
-    lasso_model = Lasso(alpha = l1_lamda) #We start with a small regularization parameter like we learned in class
-
-    #We will pre-process our data 
-    X_train, X_cv, X_test, y_train, y_cv, y_test = preprocess_np(X, y)
-    #Note we pass in y and not y since we have to predict a continious variable. 
-    #We will train our model
-    lasso_model.fit(X_train, y_train)
-    #We will make predictions
-    y_preds = lasso_model.predict(X_test)
-
-    #We will compute our RMSE for the true labels and the predicted labels
-    rmse = np.sqrt(MSE(y_test, y_preds))
-    parameters = lasso_model.coef_
-
-
-    return rmse, parameters
-
-
-#%%
-def linear_regression_10_times(): 
-    scores = np.zeros(10)
-    parameters = []
-    for i in range(10):
-        scores[i] = train_linear_regression_once()[0]
-        parameters.append(train_linear_regression_once()[1])
-    
-    #We calculate and print the mean f1 score
-    mean_score = np.mean(scores)
-    #We calculate and print the mean of each parameter
-    #We add all the parameter arrays and then divide them by 10 to get the mean of each 
-    final_array = np.zeros(shape = parameters[0].shape)
-    #For better generalization shape could be shape = parameters[0].shape
-    for i in range(10):
-        final_array += parameters[i]
-        final_array = final_array / 10
-        
-    print(f'The mean RMSE of the 10 iterations is {mean_score} \n')
-
-    #We turn this into a data-frame for easier reading 
-    final_array = pd.Series(final_array, index = X.columns).sort_values(ascending = False)
-    return mean_score, final_array
-
-#%% Function - Debug - Cell
-linear_regression_10_times()
 
 
 #%%
@@ -662,16 +354,16 @@ def objective(trial, model, X, y, task, output_shape = 3, input_shape = 11):
     return test_metric #This is what we want to optimize
 # %% Run the optimization
 
-study = optuna.create_study(direction='maximize')  # Create a new study object - maximize because we want to maximize the F1
-study.optimize(lambda trial: objective(trial, WineModelOptimized, X_in_without_outliers, y1_without_outliers, 'classification'), n_trials=100)  # Optimize the study with the objective function
+#study = optuna.create_study(direction='maximize')  # Create a new study object - maximize because we want to maximize the F1
+#study.optimize(lambda trial: objective(trial, WineModelOptimized, X_in_without_outliers, y1_without_outliers, 'classification'), n_trials=100)  # Optimize the study with the objective function
 #%%
-NN_train_test_n_times(epochs = 300, n = 1, X = X_in, y = y1, model_class = WinePredictorV0, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
+#NN_train_test_n_times(epochs = 300, n = 1, X = X_in, y = y1, model_class = WinePredictorV0, task = 'classification', name = 'Wine Classifier', batch_size = 128, input_shape=11, output_shape=3)
 # %% We keyboard interrupt this at epoch 52 
 
 #Let's obtain the parameters
 
-classification_params , classification_value = study.best_params, study.best_value
+#classification_params , classification_value = study.best_params, study.best_value
 # %% Let's try a training with this 
-NN_train_test_n_times(epochs = 250, n = 10, X = X_in_without_outliers, y = y1_without_outliers, model_class = WineModelBig, task = 'classification', name = 'Optuna Classifier Trial', learning_rate = 0.04950464437244165 , weight_decay = 0.00023573619467784986, batch_size = 32, input_shape = 11, output_shape = 3)
+#NN_train_test_n_times(epochs = 250, n = 10, X = X_in_without_outliers, y = y1_without_outliers, model_class = WineModelBig, task = 'classification', name = 'Optuna Classifier Trial', learning_rate = 0.04950464437244165 , weight_decay = 0.00023573619467784986, batch_size = 32, input_shape = 11, output_shape = 3)
 
 # %%
