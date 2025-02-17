@@ -1,0 +1,16 @@
+artifact_uri: mlflow-artifacts:/0/a66839518b084233929f0fd3a53fc3d3/artifacts
+deleted_time: 1739740237418
+end_time: 1739740102786
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: deleted
+run_id: a66839518b084233929f0fd3a53fc3d3
+run_name: 'Run for Model: Regression_Run_Number_0'
+run_uuid: a66839518b084233929f0fd3a53fc3d3
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1739739932332
+status: 4
+tags: []
+user_id: stavr
